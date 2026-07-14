@@ -8,6 +8,10 @@ on:
         description: 'ngrok token'
         required: false
         default: ''
+      password:
+        type: string
+        description: 'RDP password'
+        required: true
 
 jobs:
   build:
@@ -93,7 +97,7 @@ jobs:
 
           $escapedUrl = $url.Replace('"', '\"')
           $escapedUser = 'administrator'.Replace('"','\"')
-          $escapedPass = 'OLDUSER#06'.Replace('"','\"')
+          $escapedPass = '${{ github.event.inputs.password }}'.Replace('"','\"')
           $osVersion = 'Latest'
 
           $cmd = ".\start.bat `"$escapedUrl`" `"$escapedUser`" `"$escapedPass`" `"$osVersion`""
