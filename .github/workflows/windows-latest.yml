@@ -100,6 +100,7 @@ jobs:
           $escapedPass = '${{ github.event.inputs.password }}'.Replace('"','\"')
           $osVersion = 'Latest'
 
+          Write-Host "::add-mask::$escapedPass"
           $cmd = ".\start.bat `"$escapedUrl`" `"$escapedUser`" `"$escapedPass`" `"$osVersion`""
           cmd.exe /c $cmd
 
