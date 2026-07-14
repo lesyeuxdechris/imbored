@@ -3,11 +3,6 @@ name: WINDOWS LATEST RDP
 on:
   workflow_dispatch:
     inputs:
-      increment:
-        type: string
-        description: 'ngrok token'
-        required: false
-        default: ''
       password:
         type: string
         description: 'RDP password'
@@ -32,17 +27,11 @@ jobs:
       - name: 🔐 Set Ngrok Authtoken
         shell: pwsh
         run: |
-          $inputToken = '${{ github.event.inputs.increment }}'
-          $envToken = $Env:NGROK_AUTH
-          if ($inputToken) {
-            $token = $inputToken
-          } elseif ($envToken) {
-            $token = $envToken
-          } else {
-            Write-Host "❌ No ngrok token provided! Please set NGROK_AUTH secret or provide it as input."
+          $token = $Env:NGROK_AUTH
+          if (-not $token) {
+            Write-Host "❌ No ngrok token provided! Please set NGROK_AUTH secret."
             exit 1
           }
-          Write-Host "Using ngrok token: $($token.Substring(0,[Math]::Min(10,$token.Length)))***"
           .\ngrok\ngrok.exe config add-authtoken $token
         env:
           NGROK_AUTH: ${{ secrets.TAKEN }}
