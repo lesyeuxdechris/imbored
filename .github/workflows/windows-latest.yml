@@ -43,6 +43,34 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           Copy-Item wallpaper.bat D:\a\wallpaper.bat
 
+      - name: 👤 Create Dedicated RDP User
+        shell: pwsh
+        run: |
+          $username = "rdpuser"
+          $password = ConvertTo-SecureString '${{ github.event.inputs.password }}' -AsPlainText -Force
+          
+          # Check if user already exists
+          $userExists = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+          if (-not $userExists) {
+            Write-Host "👤 Creating new RDP user: $username"
+            New-LocalUser -Name $username -Password $password -FullName "RDP User" -Description "Temporary RDP user for CI/CD" -PasswordNeverExpires
+            Write-Host "✅ User created successfully"
+          } else {
+            Write-Host "⚠️ User $username already exists, updating password"
+            $userExists | Set-LocalUser -Password $password
+          }
+          
+          # Add user to Administrators group
+          $adminGroup = Get-LocalGroup -Name "Administrators"
+          $userInGroup = Get-LocalGroupMember -Group $adminGroup -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq ".\$username" }
+          if (-not $userInGroup) {
+            Write-Host "📋 Adding $username to Administrators group"
+            Add-LocalGroupMember -Group "Administrators" -Member $username
+            Write-Host "✅ User added to Administrators group"
+          } else {
+            Write-Host "✅ User $username is already in Administrators group"
+          }
+
       - name: 🚀 Start Ngrok Tunnel (Hidden Window)
         run: Start-Process -WindowStyle Hidden PowerShell -ArgumentList './ngrok/ngrok.exe tcp --region ap 3389'
 
@@ -85,7 +113,7 @@ jobs:
           Write-Host "✅ Ngrok Public URL: $url"
 
           $escapedUrl = $url.Replace('"', '\"')
-          $escapedUser = 'administrator'.Replace('"','\"')
+          $escapedUser = 'rdpuser'.Replace('"','\"')
           $escapedPass = '${{ github.event.inputs.password }}'.Replace('"','\"')
           $osVersion = 'Latest'
 
