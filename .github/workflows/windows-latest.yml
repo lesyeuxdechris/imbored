@@ -26,15 +26,21 @@ jobs:
 
       - name: 🔐 Set Ngrok Authtoken
         shell: pwsh
+        env:
+          NGROK_AUTH: ${{ secrets.NGROK_AUTH }}
+          TAKEN: ${{ secrets.TAKEN }}
         run: |
           $token = $Env:NGROK_AUTH
-          if (-not $token) {
-            Write-Host "❌ No ngrok token provided! Please set NGROK_AUTH secret."
+          if (-not $token -or $token -eq '') {
+            # fallback to the older/alternate secret name if present
+            $token = $Env:TAKEN
+          }
+          if (-not $token -or $token -eq '') {
+            Write-Host "❌ No ngrok token provided! Please set secrets.NGROK_AUTH or secrets.TAKEN."
             exit 1
           }
+          # don't print the token
           .\ngrok\ngrok.exe config add-authtoken $token
-        env:
-          NGROK_AUTH: ${{ secrets.TAKEN }}
 
       - name: 🔧 Enable RDP & Configure Firewall
         run: |
@@ -71,18 +77,91 @@ jobs:
             Write-Host "✅ User $username is already in Administrators group"
           }
 
-      - name: 🚀 Start Ngrok Tunnel (Hidden Window)
-        run: Start-Process -WindowStyle Hidden PowerShell -ArgumentList './ngrok/ngrok.exe tcp --region ap 3389'
-
-      - name: 🔎 Verify Ngrok process is running
+      - name: 🚀 Start Ngrok Tunnel (fallbacks & verify)
         shell: pwsh
         run: |
-          $proc = Get-Process -Name ngrok -ErrorAction SilentlyContinue
-          if ($proc) {
-            Write-Host "✅ Ngrok process is running (PID: $($proc.Id))"
-          } else {
-            Write-Host "❌ Ngrok process NOT found!"
+          $ngrokExe = Join-Path $PWD 'ngrok\ngrok.exe'
+          if (-not (Test-Path $ngrokExe)) {
+            Write-Host "❌ ngrok executable not found at $ngrokExe"
             exit 1
+          }
+
+          function Is-NgrokRunning {
+            return (Get-Process -Name ngrok -ErrorAction SilentlyContinue) -ne $null
+          }
+
+          $started = $false
+
+          Write-Host "Attempt 1: Start-Process direct"
+          try {
+            Start-Process -FilePath $ngrokExe `
+              -ArgumentList 'tcp','--region','ap','3389' `
+              -WindowStyle Hidden `
+              -RedirectStandardOutput 'ngrok.stdout.log' `
+              -RedirectStandardError 'ngrok.stderr.log' `
+              -PassThru -ErrorAction Stop | Out-Null
+            Start-Sleep -Seconds 2
+          } catch {
+            Write-Host "Direct Start-Process attempt failed: $($_.Exception.Message)"
+          }
+          if (Is-NgrokRunning) {
+            $started = $true
+            Write-Host "✅ Started ngrok via Start-Process (direct)"
+          }
+
+          if (-not $started) {
+            Write-Host "Attempt 2: Start-Job fallback"
+            try {
+              Start-Job -ScriptBlock { & $using:ngrokExe tcp --region ap 3389 } | Out-Null
+              Start-Sleep -Seconds 2
+            } catch {
+              Write-Host "Start-Job attempt failed: $($_.Exception.Message)"
+            }
+            if (Is-NgrokRunning) {
+              $started = $true
+              Write-Host "✅ Started ngrok via Start-Job"
+            }
+          }
+
+          if (-not $started) {
+            Write-Host "Attempt 3: cmd.exe fallback"
+            try {
+              Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', ".\ngrok\ngrok.exe tcp --region ap 3389" -WindowStyle Hidden -PassThru | Out-Null
+              Start-Sleep -Seconds 2
+            } catch {
+              Write-Host "cmd.exe attempt failed: $($_.Exception.Message)"
+            }
+            if (Is-NgrokRunning) {
+              $started = $true
+              Write-Host "✅ Started ngrok via cmd.exe"
+            }
+          }
+
+          # final wait/retries to ensure the process is seen
+          $retries = 10
+          while (-not (Is-NgrokRunning) -and $retries -gt 0) {
+            Start-Sleep -Seconds 2
+            $retries--
+          }
+
+          if (-not (Is-NgrokRunning)) {
+            Write-Host "❌ Ngrok process NOT found after fallback attempts."
+            if (Test-Path ngrok.stderr.log) {
+              Write-Host "---- ngrok.stderr.log ----"
+              Get-Content ngrok.stderr.log -Raw | Write-Host
+            }
+            if (Test-Path ngrok.stdout.log) {
+              Write-Host "---- ngrok.stdout.log ----"
+              Get-Content ngrok.stdout.log -Raw | Write-Host
+            }
+            Write-Host "---- Attempting to fetch ngrok API (if available) ----"
+            try {
+              curl.exe -s http://localhost:4040/api/tunnels | Write-Host
+            } catch {}
+            exit 1
+          } else {
+            $proc = Get-Process -Name ngrok -ErrorAction SilentlyContinue
+            Write-Host "✅ Ngrok process is running (PID: $($proc.Id))"
           }
 
       - name: 🕐 Wait for Ngrok to Initialize
